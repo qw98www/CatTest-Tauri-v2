@@ -1,6 +1,6 @@
-# Tauri + Vanilla TS
+# CatTest-Tauri-v2
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+Tauri v2 project scaffold using Vanilla TypeScript.
 
 ## Recommended IDE Setup
 
