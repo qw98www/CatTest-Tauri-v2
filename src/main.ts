@@ -173,7 +173,7 @@ async function finishBreak() {
 function startTimer() {
   if (!state.enabled) return;
   state.isRunning = true;
-  if (!state.isOnBreak) {
+  if (!state.nextBreakAt) {
     resetNextBreak();
   }
   updateStatusView();

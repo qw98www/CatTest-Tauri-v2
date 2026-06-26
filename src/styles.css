@@ -131,6 +131,7 @@ button {
   max-height: 400px;
   object-fit: cover;
   display: block;
+  background-color: #ffffff;
 }
 
 .fallback-content {
