@@ -358,10 +358,10 @@ function initializeBreakWindow() {
   app.className = "break-page";
   app.innerHTML = `
     <main class="break-wrap">
-      <div id="mediaContainer" class="media-container">
-        <video id="introVideo" autoplay muted playsinline preload="auto" style="display:none"></video>
-        <video id="loopVideo" muted playsinline preload="auto" style="display:none"></video>
-        <canvas id="videoCanvas" class="break-canvas"></canvas>
+      <div id="mediaContainer" class="media-container" style="background: white;">
+        <div style="position: absolute; inset: 0; background: white; border-radius: 16px;"></div>
+        <video id="introVideo" autoplay muted playsinline preload="auto" class="break-video"></video>
+        <video id="loopVideo" muted playsinline preload="auto" class="break-video" style="display:none"></video>
         <div id="fallback" class="fallback-content" style="display:none">
           <div class="cat">=^.^=</div>
         </div>
@@ -377,85 +377,63 @@ function initializeBreakWindow() {
   const endNowBtn = document.getElementById("endNowBtn");
   const introVideo = document.getElementById("introVideo") as HTMLVideoElement | null;
   const loopVideo = document.getElementById("loopVideo") as HTMLVideoElement | null;
-  const canvas = document.getElementById("videoCanvas") as HTMLCanvasElement | null;
   const fallback = document.getElementById("fallback") as HTMLElement | null;
 
-  if (!timerNode || !endNowBtn || !introVideo || !loopVideo || !canvas || !fallback) {
+  if (!timerNode || !endNowBtn || !introVideo || !loopVideo || !fallback) {
     return;
   }
 
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return;
-
-  let canvasAnimId: number | null = null;
-
-  // Tauri on macOS uses WKWebView which does not support VP8A alpha channel.
-  // We render video frames to canvas and chroma-key the near-black pixels so
-  // the container's white background shows through.
-  const startCanvasRender = (video: HTMLVideoElement) => {
-    if (canvasAnimId !== null) cancelAnimationFrame(canvasAnimId);
-    const render = () => {
-      if (video.readyState >= 2 && video.videoWidth > 0) {
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-        if (canvas.width !== vw || canvas.height !== vh) {
-          canvas.width = vw;
-          canvas.height = vh;
-        }
-        ctx.drawImage(video, 0, 0);
-        const imageData = ctx.getImageData(0, 0, vw, vh);
-        const d = imageData.data;
-        const thr = 30;
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i] < thr && d[i + 1] < thr && d[i + 2] < thr) {
-            d[i + 3] = 0; // make transparent
-          }
-        }
-        ctx.putImageData(imageData, 0, 0);
-      }
-      canvasAnimId = requestAnimationFrame(render);
-    };
-    canvasAnimId = requestAnimationFrame(render);
-  };
-
   const showFallback = () => {
-    if (canvasAnimId !== null) {
-      cancelAnimationFrame(canvasAnimId);
-      canvasAnimId = null;
-    }
-    canvas.style.display = "none";
+    introVideo.style.display = "none";
+    loopVideo.style.display = "none";
     fallback.style.display = "grid";
   };
 
+  let initialized = false;
   const initializeVideos = async () => {
+    if (initialized) return;
+    initialized = true;
+
+    introVideo.style.display = "block";
+    loopVideo.style.display = "none";
+    fallback.style.display = "none";
     introVideo.src = "/assets/assets1.webm";
     loopVideo.src = "/assets/assets2.webm";
     loopVideo.loop = true;
     introVideo.load();
     loopVideo.load();
 
-    introVideo.addEventListener("error", () => showFallback());
-    loopVideo.addEventListener("error", () => showFallback());
-
     introVideo.addEventListener(
       "ended",
       () => {
-        loopVideo.play().then(() => {
-          startCanvasRender(loopVideo);
-        }).catch(() => showFallback());
+        introVideo.style.display = "none";
+        loopVideo.style.display = "block";
+        loopVideo.play().catch(() => {
+          showFallback();
+        });
       },
       { once: true }
     );
 
+    introVideo.addEventListener("error", () => showFallback());
+    loopVideo.addEventListener("error", () => showFallback());
+
     try {
       await new Promise<void>((resolve, reject) => {
-        const onLoaded = () => resolve();
-        const onErr = () => reject(new Error("intro load failed"));
+        const onLoaded = () => {
+          introVideo.removeEventListener("loadeddata", onLoaded);
+          introVideo.removeEventListener("error", onErr);
+          resolve();
+        };
+        const onErr = () => {
+          introVideo.removeEventListener("loadeddata", onLoaded);
+          introVideo.removeEventListener("error", onErr);
+          reject(new Error("intro load failed"));
+        };
         introVideo.addEventListener("loadeddata", onLoaded, { once: true });
         introVideo.addEventListener("error", onErr, { once: true });
       });
       await introVideo.play();
-      startCanvasRender(introVideo);
     } catch (_error) {
       showFallback();
     }
@@ -479,7 +457,6 @@ function initializeBreakWindow() {
 
   endNowBtn.addEventListener("click", async () => {
     window.clearInterval(interval);
-    if (canvasAnimId !== null) cancelAnimationFrame(canvasAnimId);
     await emit("break-end-now");
     await invoke("close_break_window");
   });
