@@ -358,10 +358,8 @@ function initializeBreakWindow() {
   app.className = "break-page";
   app.innerHTML = `
     <main class="break-wrap">
-      <div id="mediaContainer" class="media-container" style="background: white;">
-        <div style="position: absolute; inset: 0; background: white; border-radius: 16px;"></div>
-        <video id="introVideo" autoplay muted playsinline preload="auto" class="break-video"></video>
-        <video id="loopVideo" muted playsinline preload="auto" class="break-video" style="display:none"></video>
+      <div id="mediaContainer" class="media-container">
+        <canvas id="videoCanvas" class="break-canvas"></canvas>
         <div id="fallback" class="fallback-content" style="display:none">
           <div class="cat">=^.^=</div>
         </div>
@@ -375,65 +373,69 @@ function initializeBreakWindow() {
 
   const timerNode = document.getElementById("timer");
   const endNowBtn = document.getElementById("endNowBtn");
-  const introVideo = document.getElementById("introVideo") as HTMLVideoElement | null;
-  const loopVideo = document.getElementById("loopVideo") as HTMLVideoElement | null;
+  const canvas = document.getElementById("videoCanvas") as HTMLCanvasElement | null;
   const fallback = document.getElementById("fallback") as HTMLElement | null;
 
-  if (!timerNode || !endNowBtn || !introVideo || !loopVideo || !fallback) {
+  if (!timerNode || !endNowBtn || !canvas || !fallback) {
     return;
   }
 
+  const ctx = canvas.getContext("2d");
+
+  // WKWebView's DOM VideoLayer compositor discards VP9A alpha when compositing.
+  // Routing drawImage through Canvas 2D bypasses that layer and preserves alpha.
+  const introVideo = document.createElement("video");
+  const loopVideo = document.createElement("video");
+  introVideo.muted = true;
+  introVideo.playsInline = true;
+  loopVideo.muted = true;
+  loopVideo.playsInline = true;
+  loopVideo.loop = true;
+
+  let rafId: number | null = null;
+
+  const startRender = (video: HTMLVideoElement) => {
+    if (rafId !== null) cancelAnimationFrame(rafId);
+    const draw = () => {
+      if (ctx && video.readyState >= 2 && video.videoWidth > 0) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0);
+      }
+      rafId = requestAnimationFrame(draw);
+    };
+    rafId = requestAnimationFrame(draw);
+  };
+
   const showFallback = () => {
-    introVideo.style.display = "none";
-    loopVideo.style.display = "none";
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    canvas.style.display = "none";
     fallback.style.display = "grid";
   };
 
-  let initialized = false;
   const initializeVideos = async () => {
-    if (initialized) return;
-    initialized = true;
-
-    introVideo.style.display = "block";
-    loopVideo.style.display = "none";
-    fallback.style.display = "none";
     introVideo.src = "/assets/assets1.webm";
     loopVideo.src = "/assets/assets2.webm";
-    loopVideo.loop = true;
     introVideo.load();
     loopVideo.load();
-
-    introVideo.addEventListener(
-      "ended",
-      () => {
-        introVideo.style.display = "none";
-        loopVideo.style.display = "block";
-        loopVideo.play().catch(() => {
-          showFallback();
-        });
-      },
-      { once: true }
-    );
 
     introVideo.addEventListener("error", () => showFallback());
     loopVideo.addEventListener("error", () => showFallback());
 
+    introVideo.addEventListener("ended", () => {
+      loopVideo.play().then(() => startRender(loopVideo)).catch(() => showFallback());
+    }, { once: true });
+
     try {
       await new Promise<void>((resolve, reject) => {
-        const onLoaded = () => {
-          introVideo.removeEventListener("loadeddata", onLoaded);
-          introVideo.removeEventListener("error", onErr);
-          resolve();
-        };
-        const onErr = () => {
-          introVideo.removeEventListener("loadeddata", onLoaded);
-          introVideo.removeEventListener("error", onErr);
-          reject(new Error("intro load failed"));
-        };
-        introVideo.addEventListener("loadeddata", onLoaded, { once: true });
-        introVideo.addEventListener("error", onErr, { once: true });
+        introVideo.addEventListener("loadeddata", () => resolve(), { once: true });
+        introVideo.addEventListener("error", () => reject(new Error("load failed")), { once: true });
       });
       await introVideo.play();
+      startRender(introVideo);
     } catch (_error) {
       showFallback();
     }
@@ -457,6 +459,7 @@ function initializeBreakWindow() {
 
   endNowBtn.addEventListener("click", async () => {
     window.clearInterval(interval);
+    if (rafId !== null) cancelAnimationFrame(rafId);
     await emit("break-end-now");
     await invoke("close_break_window");
   });
