@@ -124,6 +124,7 @@ button {
   overflow: hidden;
   margin-bottom: 16px;
   background: #ffffff;
+  position: relative;
 }
 
 .break-video {
@@ -131,7 +132,8 @@ button {
   max-height: 400px;
   object-fit: cover;
   display: block;
-  background-color: #ffffff;
+  background: white;
+  min-height: 200px;
 }
 
 .fallback-content {
