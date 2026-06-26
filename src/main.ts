@@ -359,8 +359,9 @@ function initializeBreakWindow() {
   app.innerHTML = `
     <main class="break-wrap">
       <div id="mediaContainer" class="media-container" style="background: white;">
-        <video id="introVideo" autoplay muted playsinline preload="auto" class="break-video" style="background: white;"></video>
-        <video id="loopVideo" muted playsinline preload="auto" class="break-video" style="display:none; background: white;"></video>
+        <div style="position: absolute; inset: 0; background: white; border-radius: 16px;"></div>
+        <video id="introVideo" autoplay muted playsinline preload="auto" class="break-video"></video>
+        <video id="loopVideo" muted playsinline preload="auto" class="break-video" style="display:none"></video>
         <div id="fallback" class="fallback-content" style="display:none">
           <div class="cat">=^.^=</div>
         </div>

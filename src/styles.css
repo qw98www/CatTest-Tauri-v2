@@ -132,7 +132,8 @@ button {
   max-height: 400px;
   object-fit: cover;
   display: block;
-  background: white;
+  position: relative;
+  z-index: 1;
   min-height: 200px;
 }
 
