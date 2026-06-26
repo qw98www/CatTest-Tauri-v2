@@ -5,6 +5,7 @@ type Settings = {
   enabled: boolean;
   intervalMinutes: number;
   breakMinutes: number;
+  launchAtLogin: boolean;
 };
 
 type RuntimeState = {
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   intervalMinutes: 45,
   breakMinutes: 5,
+  launchAtLogin: false,
 };
 
 const state: Settings & RuntimeState = {
@@ -46,6 +48,7 @@ function loadSettings() {
     state.enabled = parsed.enabled !== false;
     state.intervalMinutes = clampNumber(parsed.intervalMinutes, 1, 240, DEFAULT_SETTINGS.intervalMinutes);
     state.breakMinutes = clampNumber(parsed.breakMinutes, 1, 60, DEFAULT_SETTINGS.breakMinutes);
+    state.launchAtLogin = parsed.launchAtLogin === true;
   } catch (_error) {
     // Ignore malformed local settings and keep defaults.
   }
@@ -56,8 +59,27 @@ function saveSettings() {
     enabled: state.enabled,
     intervalMinutes: state.intervalMinutes,
     breakMinutes: state.breakMinutes,
+    launchAtLogin: state.launchAtLogin,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
+}
+
+function currentStatusLabel() {
+  if (!state.enabled) return "OFF";
+  if (state.isOnBreak) return "BREAK";
+  if (state.isRunning) return "ON";
+  return "PAUSE";
+}
+
+async function syncTrayState() {
+  try {
+    await invoke("update_tray_state", {
+      statusLabel: currentStatusLabel(),
+      isRunning: state.isRunning,
+    });
+  } catch (_error) {
+    // Keep UI responsive even if tray update fails.
+  }
 }
 
 function formatMsAsClock(ms: number) {
@@ -80,34 +102,40 @@ function updateStatusView() {
   if (!state.enabled) {
     statusText.textContent = "Disabled";
     nextBreakText.textContent = "";
+    void syncTrayState();
     return;
   }
 
   if (state.isOnBreak && state.breakEndAt) {
     statusText.textContent = "On Break";
     nextBreakText.textContent = `Break remaining: ${formatMsAsClock(state.breakEndAt - Date.now())}`;
+    void syncTrayState();
     return;
   }
 
   if (state.isRunning && state.nextBreakAt) {
     statusText.textContent = "Running";
     nextBreakText.textContent = `Next break in: ${formatMsAsClock(state.nextBreakAt - Date.now())}`;
+    void syncTrayState();
     return;
   }
 
   statusText.textContent = "Paused";
   nextBreakText.textContent = "";
+  void syncTrayState();
 }
 
 function syncForm() {
   const enabledInput = document.getElementById("enabled") as HTMLInputElement | null;
   const intervalInput = document.getElementById("intervalMinutes") as HTMLInputElement | null;
   const breakInput = document.getElementById("breakMinutes") as HTMLInputElement | null;
-  if (!enabledInput || !intervalInput || !breakInput) return;
+  const launchAtLoginInput = document.getElementById("launchAtLogin") as HTMLInputElement | null;
+  if (!enabledInput || !intervalInput || !breakInput || !launchAtLoginInput) return;
 
   enabledInput.checked = !!state.enabled;
   intervalInput.value = String(state.intervalMinutes);
   breakInput.value = String(state.breakMinutes);
+  launchAtLoginInput.checked = !!state.launchAtLogin;
 }
 
 async function openBreakWindow() {
@@ -226,6 +254,11 @@ function renderMainPanel() {
         <input id="breakMinutes" type="number" min="1" max="60" value="5" />
       </label>
 
+      <label>
+        <span>Launch at login</span>
+        <input id="launchAtLogin" type="checkbox" />
+      </label>
+
       <div class="actions">
         <button id="saveBtn">Save</button>
         <button id="startBtn">Start</button>
@@ -250,11 +283,14 @@ function renderMainPanel() {
     const enabledInput = document.getElementById("enabled") as HTMLInputElement | null;
     const intervalInput = document.getElementById("intervalMinutes") as HTMLInputElement | null;
     const breakInput = document.getElementById("breakMinutes") as HTMLInputElement | null;
-    if (!enabledInput || !intervalInput || !breakInput) return;
+    const launchAtLoginInput = document.getElementById("launchAtLogin") as HTMLInputElement | null;
+    if (!enabledInput || !intervalInput || !breakInput || !launchAtLoginInput) return;
 
     state.enabled = enabledInput.checked;
     state.intervalMinutes = clampNumber(intervalInput.value, 1, 240, DEFAULT_SETTINGS.intervalMinutes);
     state.breakMinutes = clampNumber(breakInput.value, 1, 60, DEFAULT_SETTINGS.breakMinutes);
+    state.launchAtLogin = launchAtLoginInput.checked;
+    void invoke("set_launch_at_login", { enabled: state.launchAtLogin });
     saveSettings();
 
     if (!state.enabled) {
@@ -282,6 +318,12 @@ function renderMainPanel() {
 
 async function initializeMainWindow() {
   loadSettings();
+  try {
+    const launchEnabled = await invoke<boolean>("get_launch_at_login");
+    state.launchAtLogin = launchEnabled;
+  } catch (_error) {
+    // Keep saved value when backend query fails.
+  }
   renderMainPanel();
   startTick();
   startTimer();

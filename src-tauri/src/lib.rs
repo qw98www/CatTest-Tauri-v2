@@ -3,6 +3,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 #[tauri::command]
 fn open_break_window(app: tauri::AppHandle, break_minutes: u32) -> Result<(), String> {
@@ -41,6 +42,36 @@ fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable().map_err(|e| e.to_string())?;
+    } else {
+        autostart.disable().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_launch_at_login(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_tray_state(app: tauri::AppHandle, status_label: String, is_running: bool) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray
+            .set_title(Some(format!("CatTest {status_label}")))
+            .map_err(|e| e.to_string())?;
+        if let Some(toggle_item) = app.menu().and_then(|m| m.get("toggle")) {
+            let next_label = if is_running { "Pause Timer" } else { "Start Timer" };
+            let _ = toggle_item.as_menuitem().map(|i| i.set_text(next_label));
+        }
+    }
+    Ok(())
+}
+
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let show_item = MenuItem::with_id(app, "show", "Show Control Panel", true, None::<&str>)?;
     let toggle_item = MenuItem::with_id(app, "toggle", "Start / Pause", true, None::<&str>)?;
@@ -52,7 +83,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         &[&show_item, &toggle_item, &skip_item, &separator, &quit_item],
     )?;
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
@@ -92,12 +123,20 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_title(Some("CatTest ON"));
+    }
+
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             build_tray(app.handle())?;
@@ -116,7 +155,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_break_window,
             close_break_window,
-            show_main_window
+            show_main_window,
+            set_launch_at_login,
+            get_launch_at_login,
+            update_tray_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
